@@ -5,8 +5,6 @@ By Xiang Zhang @ New York University
 
 -- Necessary functionalities
 require("nn")
-require("cutorch")
-require("cunn")
 require("gnuplot")
 
 -- Local requires
@@ -29,7 +27,9 @@ main = {}
 -- The main program
 function main.main()
    -- Setting the device
-   if config.main.device then
+   if config.main.device and config.main.type == "torch.CudaTensor" then
+      require("cutorch")
+      require("cunn")
       cutorch.setDevice(config.main.device)
       print("Device set to "..config.main.device)
    end
@@ -37,7 +37,7 @@ function main.main()
    main.clock = {}
    main.clock.log = 0
 
-   main.argparse()
+   main.opt = main.argparse()
    main.new()
    main.run()
 end
@@ -48,6 +48,7 @@ function main.argparse()
 
    -- Options
    cmd:option("-resume",0,"Resumption point in epoch. 0 means not resumption.")
+   cmd:option("-gui", false, "Whether draw visualization or not.")
    cmd:text()
    
    -- Parse the option
@@ -116,12 +117,13 @@ function main.new()
       local resume = torch.load(config.main.resume)
       main.record = resume.record
       if resume.momentum then main.train.old_grads:copy(resume.momentum) end
-      main.show()
+      if main.opt.gui then main.show() end
    end
-
-   -- The visualization
-   main.mui = Mui{width=config.mui.width,scale=config.mui.scale,n=config.mui.n,title="Model Visualization"}
-   main.draw()
+   if main.opt.gui then
+      -- The visualization
+      main.mui = Mui{width=config.mui.width,scale=config.mui.scale,n=config.mui.n,title="Model Visualization"}
+      main.draw()
+   end
    collectgarbage()
 end
 
@@ -156,14 +158,15 @@ function main.run()
 				     val_error = main.test_val.e,
 				     val_loss = main.test_val.l}
       if config.test.confusion then
-	 main.record[#main.record].train_confusion = main.test_train.confusion:clone()
-	 main.record[#main.record].val_confusion = main.test_val.confusion:clone()
+	    main.record[#main.record].train_confusion = main.test_train.confusion:clone()
+	    main.record[#main.record].val_confusion = main.test_val.confusion:clone()
       end
-      
-      print("Visualizing loss")
-      main.show()
-      print("Visualizing the models")
-      main.draw()
+      if main.opt.gui then
+         print("Visualizing loss")
+         main.show()
+         print("Visualizing the models")
+         main.draw()
+      end
       print("Saving data")
       main.save()
       collectgarbage()
@@ -173,7 +176,9 @@ end
 -- Final cleaning up
 function main.clean()
    print("Cleaning up...")
-   gnuplot.closeall()
+   if main.opt.gui then
+      gnuplot.closeall()
+   end
 end
 
 -- Draw the graph
@@ -210,7 +215,9 @@ end
 
 -- Draw the visualization
 function main.draw()
-   main.mui:drawSequential(main.model.sequential)
+   if main.opt.gui then
+      main.mui:drawSequential(main.model.sequential)
+   end
 end
 
 -- Save a record
@@ -224,11 +231,13 @@ function main.save()
 	      {config = config, record = main.record, momentum = main.train.old_grads:double()})
    torch.save(paths.concat(config.main.save,"sequential_"..(main.train.epoch-1).."_"..time..".t7b"),
 	      main.model:clearSequential(main.model:makeCleanSequential(main.model.sequential)))
-   main.eps_error = main.eps_error or gnuplot.epsfigure(paths.concat(config.main.save,"figure_error.eps"))
-   main.eps_loss = main.eps_loss or gnuplot.epsfigure(paths.concat(config.main.save,"figure_loss.eps"))
-   main.show(main.eps_error,main.eps_loss)
-   local ret = pcall(function() main.mui.win:save(paths.concat(config.main.save,"sequential_"..(main.train.epoch-1).."_"..time..".png")) end)
-   if not ret then print("Warning: saving the model image failed") end
+   if main.opt.gui then
+      main.eps_error = main.eps_error or gnuplot.epsfigure(paths.concat(config.main.save,"figure_error.eps"))
+      main.eps_loss = main.eps_loss or gnuplot.epsfigure(paths.concat(config.main.save,"figure_loss.eps"))
+      main.show(main.eps_error,main.eps_loss)
+      local ret = pcall(function() main.mui.win:save(paths.concat(config.main.save,"sequential_"..(main.train.epoch-1).."_"..time..".png")) end)
+      if not ret then print("Warning: saving the model image failed") end
+   end
    collectgarbage()
 end
 
@@ -270,7 +279,7 @@ function main.trainlog(train)
 	    ", osd: "..string.format("%.2e",train.old_grads:std())..
 	    ", omi: "..string.format("%.2e",train.old_grads:min())..
 	    ", omx: "..string.format("%.2e",train.old_grads:max())
-	 main.draw()
+	     if main.opt.gui then main.draw() end
       end
       
       if config.main.details or config.main.debug then
